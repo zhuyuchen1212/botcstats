@@ -726,13 +726,10 @@ export class StorytellerAnalytics {
             win_pct: stats.games > 0 ? (stats.wins / stats.games * 100) : 0,
             last_three_games: stats.last_three_games,
             last_three_wins: stats.last_three_wins,
-            last3_win_pct: pct(stats.last_three_wins, stats.last_three_games),
+            last3_rate_pct: pct(stats.last_three_games, stats.games),
             survived_games: stats.survived_games,
-            survived_wins: stats.survived_wins,
-            survived_win_pct: pct(stats.survived_wins, stats.survived_games),
             dead_games: stats.dead_games,
-            dead_wins: stats.dead_wins,
-            dead_win_pct: pct(stats.dead_wins, stats.dead_games),
+            survival_pct: pct(stats.survived_games, stats.survived_games + stats.dead_games),
         }));
 
         if (roleTypeFilter !== 'All') {
@@ -780,19 +777,17 @@ export class StorytellerAnalytics {
             }
         }
 
-        const pct = (n, d) => d > 0 ? (n / d * 100).toFixed(1) : null;
+        const ratePct = (n, d) => d > 0 ? (n / d * 100) : null;
+        const survivalPlays = alivePlays + deadPlays;
 
         return {
             trackedGames,
             alivePlays,
-            aliveWins,
-            aliveWinPct: pct(aliveWins, alivePlays),
             deadPlays,
-            deadWins,
-            deadWinPct: pct(deadWins, deadPlays),
+            survivalPlays,
+            survivalPct: ratePct(alivePlays, survivalPlays),
             last3Plays,
-            last3Wins,
-            last3WinPct: pct(last3Wins, last3Plays),
+            last3Pct: ratePct(last3Plays, survivalPlays),
         };
     }
 
@@ -800,25 +795,26 @@ export class StorytellerAnalytics {
      * Per-player survival stats for the survival dashboard table.
      */
     getSurvivalPlayerStats() {
-        const pct = (wins, games) => games > 0 ? (wins / games * 100) : null;
+        const ratePct = (n, d) => d > 0 ? (n / d * 100) : null;
 
         return Object.entries(this.playerStats)
-            .map(([name, s]) => ({
-                name,
-                games: s.games,
-                last_three_games: s.last_three_games,
-                last_three_wins: s.last_three_wins,
-                last3WinPct: pct(s.last_three_wins, s.last_three_games),
-                survived_games: s.survived_games,
-                survived_wins: s.survived_wins,
-                survivedWinPct: pct(s.survived_wins, s.survived_games),
-                dead_games: s.dead_games,
-                dead_wins: s.dead_wins,
-                deadWinPct: pct(s.dead_wins, s.dead_games),
-                hasSurvivalData: s.dead_games > 0 || s.last_three_games > 0
-                    || (s.survived_games > 0 && this.games.some(g =>
-                        g.players?.some(p => p.name === name && p.survived === false))),
-            }))
+            .map(([name, s]) => {
+                const survivalGames = s.survived_games + s.dead_games;
+                return {
+                    name,
+                    games: s.games,
+                    last_three_games: s.last_three_games,
+                    survived_games: s.survived_games,
+                    dead_games: s.dead_games,
+                    survivalGames,
+                    survivalPct: ratePct(s.survived_games, survivalGames),
+                    last3Pct: ratePct(s.last_three_games, s.games),
+                    hasSurvivalData: s.dead_games > 0 || s.last_three_games > 0
+                        || (s.survived_games > 0 && this.games.some(g =>
+                            g.players?.some(p => p.name === name && p.survived === false))),
+                };
+            })
+            .filter(p => p.games > 0 && (p.survivalGames > 0 || p.last_three_games > 0))
             .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
     }
 

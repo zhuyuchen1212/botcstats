@@ -341,8 +341,10 @@ function updateSummary() {
     const aliveEl = document.getElementById('summary-alive');
     const deadEl = document.getElementById('summary-dead');
     if (survival.trackedGames > 0) {
-        aliveEl.textContent = `Alive: ${survival.aliveWinPct}%`;
-        deadEl.textContent = `Dead: ${survival.deadWinPct}%`;
+        const surv = survival.survivalPct != null ? survival.survivalPct.toFixed(1) : '—';
+        const l3 = survival.last3Pct != null ? survival.last3Pct.toFixed(1) : '—';
+        aliveEl.textContent = `Survival: ${surv}%`;
+        deadEl.textContent = `Last 3: ${l3}%`;
     } else {
         aliveEl.textContent = 'Alive: —';
         deadEl.textContent = 'Dead: —';
@@ -354,7 +356,10 @@ function updateSummary() {
 // ==========================================
 
 function formatSurvivalPct(value) {
-    return value != null ? `${value}%` : '—';
+    if (value == null || value === '') return '—';
+    const n = typeof value === 'string' ? parseFloat(value) : value;
+    if (Number.isNaN(n)) return '—';
+    return `${n.toFixed(1)}%`;
 }
 
 /**
@@ -363,15 +368,12 @@ function formatSurvivalPct(value) {
 function updateSurvivalTab() {
     const summary = currentAnalytics.getSurvivalSummary();
 
-    document.getElementById('survival-alive-pct').textContent = formatSurvivalPct(summary.aliveWinPct);
+    document.getElementById('survival-alive-pct').textContent = formatSurvivalPct(summary.survivalPct);
     document.getElementById('survival-alive-detail').textContent =
-        `${summary.aliveWins} wins / ${summary.alivePlays} alive at end`;
-    document.getElementById('survival-dead-pct').textContent = formatSurvivalPct(summary.deadWinPct);
-    document.getElementById('survival-dead-detail').textContent =
-        `${summary.deadWins} wins / ${summary.deadPlays} died early`;
-    document.getElementById('survival-last3-pct').textContent = formatSurvivalPct(summary.last3WinPct);
+        `${summary.alivePlays} alive / ${summary.survivalPlays} tracked player-games`;
+    document.getElementById('survival-last3-pct').textContent = formatSurvivalPct(summary.last3Pct);
     document.getElementById('survival-last3-detail').textContent =
-        `${summary.last3Wins} wins / ${summary.last3Plays} in final 3`;
+        `${summary.last3Plays} in final 3 / ${summary.survivalPlays} tracked player-games`;
     document.getElementById('survival-tracked-games').textContent = summary.trackedGames;
 
     const tbody = document.getElementById('survival-body');
@@ -380,7 +382,7 @@ function updateSurvivalTab() {
 
     if (players.length === 0) {
         const row = document.createElement('tr');
-        row.innerHTML = '<td colspan="8" style="text-align:center; opacity:0.5;">No survival data yet — mark players with <strong>dead</strong> or <strong>l3</strong> when logging games</td>';
+        row.innerHTML = '<td colspan="5" style="text-align:center; opacity:0.5;">No survival data yet — mark players with <strong>dead</strong> or <strong>l3</strong> when logging games</td>';
         tbody.appendChild(row);
     } else {
         for (const p of players) {
@@ -389,11 +391,8 @@ function updateSurvivalTab() {
             row.innerHTML = `
                 <td><strong>${p.name.replace(/_/g, ' ')}</strong></td>
                 <td>${p.games}</td>
-                <td class="good-text">${formatSurvivalPct(p.survivedWinPct)}</td>
-                <td>${p.survived_games}</td>
-                <td class="evil-text">${formatSurvivalPct(p.deadWinPct)}</td>
-                <td>${p.dead_games}</td>
-                <td>${formatSurvivalPct(p.last3WinPct)}</td>
+                <td class="good-text">${formatSurvivalPct(p.survivalPct)}</td>
+                <td>${formatSurvivalPct(p.last3Pct)}</td>
                 <td>${p.last_three_games}</td>
             `;
             row.addEventListener('click', () => {
@@ -412,7 +411,7 @@ function updateSurvivalTab() {
 
     if (characters.length === 0) {
         const row = document.createElement('tr');
-        row.innerHTML = '<td colspan="7" style="text-align:center; opacity:0.5;">No role survival data yet</td>';
+        row.innerHTML = '<td colspan="5" style="text-align:center; opacity:0.5;">No role survival data yet</td>';
         rolesBody.appendChild(row);
     } else {
         for (const char of characters) {
@@ -421,11 +420,9 @@ function updateSurvivalTab() {
             row.innerHTML = `
                 <td>${char.character.replace(/_/g, ' ')}</td>
                 <td><span class="role-type-badge ${char.role_type.toLowerCase()}">${char.role_type}</span></td>
-                <td>${char.win_pct.toFixed(1)}%</td>
                 <td>${char.games}</td>
-                <td class="good-text">${formatSurvivalPct(char.survived_win_pct)}</td>
-                <td class="evil-text">${formatSurvivalPct(char.dead_win_pct)}</td>
-                <td>${formatSurvivalPct(char.last3_win_pct)}</td>
+                <td class="good-text">${formatSurvivalPct(char.survival_pct)}</td>
+                <td>${formatSurvivalPct(char.last3_rate_pct)}</td>
             `;
             row.addEventListener('click', () => {
                 const eloData = characterEloRatings[char.character];
@@ -984,6 +981,9 @@ function showGameDetail(game) {
             }
 
             const statusParts = [];
+            if (p.bluff_role) {
+                statusParts.push(`<span class="player-status-badge bluff">Bluff: ${p.bluff_role.replace(/_/g, ' ')}</span>`);
+            }
             if (p.last_three === true) statusParts.push('<span class="player-status-badge last3">Last 3</span>');
             if (p.survived === false) {
                 statusParts.push('<span class="player-status-badge dead">Dead</span>');
@@ -1120,6 +1120,13 @@ const EVIL_TEAM_BY_SIZE = {
     13: '1 Demon, 3 Minions', 14: '1 Demon, 3 Minions', 15: '1 Demon, 3 Minions'
 };
 
+const GOOD_TEAM_BY_SIZE = {
+    5: '3 Townsfolk, 1 Outsider', 6: '3 Townsfolk, 1 Outsider',
+    7: '5 Townsfolk, 0 Outsiders', 8: '5 Townsfolk, 1 Outsider', 9: '5 Townsfolk, 2 Outsiders',
+    10: '6 Townsfolk, 2 Outsiders', 11: '6 Townsfolk, 2 Outsiders', 12: '7 Townsfolk, 2 Outsiders',
+    13: '7 Townsfolk, 3 Outsiders', 14: '8 Townsfolk, 3 Outsiders', 15: '8 Townsfolk, 4 Outsiders'
+};
+
 /**
  * Update the game size tab.
  */
@@ -1148,7 +1155,7 @@ function updateGameSizeTab() {
 
     if (sizes.length === 0) {
         const row = document.createElement('tr');
-        row.innerHTML = '<td colspan="7" style="text-align:center; opacity:0.5;">No games found</td>';
+        row.innerHTML = '<td colspan="8" style="text-align:center; opacity:0.5;">No games found</td>';
         tbody.appendChild(row);
         return;
     }
@@ -1159,17 +1166,18 @@ function updateGameSizeTab() {
         const evilPct = data.games > 0 ? (data.evil_wins / data.games * 100).toFixed(1) : '0.0';
         const expectedGood = EXPECTED_GOOD_WIN_PCT[size];
         const expectedEvil = expectedGood ? (100 - expectedGood) : null;
+        const goodTeam = GOOD_TEAM_BY_SIZE[size] || (size >= 15 ? '8 Townsfolk, 4 Outsiders' : '?');
         const evilTeam = EVIL_TEAM_BY_SIZE[size] || (size >= 15 ? '1 Demon, 3 Minions' : '?');
 
         const row = document.createElement('tr');
         row.style.cursor = 'pointer';
 
-        // Highlight deviation from expected
         let goodClass = 'good-text';
         let evilClass = 'evil-text';
 
         row.innerHTML = `
             <td><strong>${size}</strong></td>
+            <td>${goodTeam}</td>
             <td>${evilTeam}</td>
             <td>${data.games}</td>
             <td class="${goodClass}">${goodPct}%</td>

@@ -451,6 +451,15 @@ async function verifyCode() {
 }
 
 /**
+ * Whether this role can receive a storyteller bluff (Drunk, Marionette).
+ * @param {string} role
+ */
+function roleNeedsBluff(role) {
+    const key = (role || '').toLowerCase().replace(/\s+/g, '_');
+    return key === 'drunk' || key === 'marionette';
+}
+
+/**
  * Parse team input text into player objects
  */
 function parseTeamInput(text) {
@@ -493,6 +502,20 @@ function parseTeamInput(text) {
             }
         }
 
+        // Bluff role for Drunk / Marionette: bluff:Role or "as Role"
+        let bluff_role = null;
+        const bluffTokenIdx = tokens.findIndex(t => /^bluff:/i.test(t));
+        if (bluffTokenIdx >= 0) {
+            bluff_role = standardizeRole(tokens[bluffTokenIdx].replace(/^bluff:/i, ''));
+            tokens.splice(bluffTokenIdx, 1);
+        } else {
+            const asIdx = tokens.findIndex(t => t.toLowerCase() === 'as');
+            if (asIdx >= 0) {
+                bluff_role = standardizeRole(tokens.slice(asIdx + 1).join(' '));
+                tokens = tokens.slice(0, asIdx);
+            }
+        }
+
         const roleStr = tokens.join(' ');
 
         // Process roles (split on +)
@@ -519,6 +542,9 @@ function parseTeamInput(text) {
         };
         if (last_three) {
             player.last_three = true;
+        }
+        if (bluff_role && roleNeedsBluff(finalRole)) {
+            player.bluff_role = bluff_role;
         }
         players.push(player);
     }
@@ -1062,6 +1088,10 @@ function formatPlayersForTextarea(players) {
         // Add team hint if initial team differs from final team
         if (p.initial_team && p.initial_team !== p.team) {
             line += ' ' + p.initial_team + '->' + p.team;
+        }
+
+        if (p.bluff_role) {
+            line += ' bluff:' + p.bluff_role;
         }
 
         if (p.last_three === true) {
