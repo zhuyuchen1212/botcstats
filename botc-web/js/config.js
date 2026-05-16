@@ -243,11 +243,96 @@ export function normalizeScriptName(name) {
     return (name || "").trim().toLowerCase();
 }
 
+/** Default category for scripts in the hardcoded dropdown (when not in Supabase). */
+const DEFAULT_SCRIPT_CATEGORIES = {
+    "trouble brewing": "Normal",
+    "bad moon rising": "Normal",
+    "sects & violets": "Normal",
+    "trouble in violets": "Normal",
+    "no greater joy": "Teensyville",
+    "over the river": "Teensyville",
+    "laissez un faire": "Teensyville",
+    "trouble in legion": "Normal",
+    "hide & seek": "Normal",
+    "trouble brewing on expert mode": "Normal",
+    "trained killer": "Normal",
+    "irrational behavior": "Normal",
+    "binary supernovae": "Normal",
+    "a leech of distrust": "Teensyville",
+    "everybody can play": "Normal",
+};
+
+/** Categories from Supabase scripts table (name -> Normal | Teensyville). */
+let scriptCategoryMap = new Map();
+
+/**
+ * Load script categories from the database scripts list.
+ * @param {Array<{name: string, category: string}>} scripts
+ */
+export function setScriptCategories(scripts) {
+    scriptCategoryMap = new Map();
+    if (!scripts) return;
+    for (const s of scripts) {
+        if (s.name && s.category) {
+            scriptCategoryMap.set(normalizeScriptName(s.name), s.category);
+        }
+    }
+}
+
+/**
+ * Get category for a script name (without player-count fallback).
+ * @param {string} name
+ * @returns {'Normal'|'Teensyville'}
+ */
+export function getScriptCategory(name) {
+    const key = normalizeScriptName(name);
+    if (scriptCategoryMap.has(key)) {
+        return scriptCategoryMap.get(key);
+    }
+    if (DEFAULT_SCRIPT_CATEGORIES[key]) {
+        return DEFAULT_SCRIPT_CATEGORIES[key];
+    }
+    if (NORMAL_SCRIPTS.has(key)) {
+        return "Normal";
+    }
+    return "Teensyville";
+}
+
 /**
  * Categorize a script as 'Normal' or 'Teensyville'.
+ * @param {string} name - Script name
+ * @param {number|null} playerCount - Optional player count for fallback
  */
-export function categorizeScript(name) {
-    return NORMAL_SCRIPTS.has(normalizeScriptName(name)) ? "Normal" : "Teensyville";
+export function categorizeScript(name, playerCount = null) {
+    const key = normalizeScriptName(name);
+    if (scriptCategoryMap.has(key)) {
+        return scriptCategoryMap.get(key);
+    }
+    // Player count is the most reliable signal for games without a DB script entry
+    if (playerCount != null) {
+        if (playerCount >= 7) return "Normal";
+        if (playerCount >= 5 && playerCount <= 6) return "Teensyville";
+    }
+    if (DEFAULT_SCRIPT_CATEGORIES[key]) {
+        return DEFAULT_SCRIPT_CATEGORIES[key];
+    }
+    if (NORMAL_SCRIPTS.has(key)) {
+        return "Normal";
+    }
+    return "Teensyville";
+}
+
+/**
+ * Categorize a game using stored category, script name, and player count.
+ * @param {Object} game
+ * @returns {'Normal'|'Teensyville'}
+ */
+export function categorizeGame(game) {
+    if (game?.modifiers?.category) {
+        return game.modifiers.category;
+    }
+    const playerCount = game?.players?.length ?? null;
+    return categorizeScript(game?.game_mode || "", playerCount);
 }
 
 /**

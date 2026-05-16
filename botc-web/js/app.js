@@ -2,25 +2,23 @@
  * Blood on the Clocktower Stats - Main Application
  */
 
-import { recalcAll, getLeaderboard, pctToStr, getRatingDelta } from './elo.js';
+import { recalcAll, getLeaderboard, pctToStr } from './elo.js';
 import { fetchGames, isDemoMode } from './supabase.js';
 import { initGameEntry, updatePlayerNames } from './gameEntry.js';
+import { initDataTab, renderDataTab } from './dataTab.js';
 import SITE_CONFIG from './site-config.js';
 
 // Global state
 let gameLog = [];
 let players = {};
 let leaderboard = [];
-let currentSort = { column: 'rating', ascending: false };
+let currentSort = { column: 'overall', ascending: false };
 
 // DOM Elements
 const loadingEl = document.getElementById('loading');
 const errorEl = document.getElementById('error');
 const contentEl = document.getElementById('content');
 const tableBodyEl = document.getElementById('leaderboard-body');
-const gameRangeInput = document.getElementById('game-range');
-const clearRangeBtn = document.getElementById('clear-range');
-
 // Stats elements
 const totalGamesEl = document.getElementById('total-games');
 const totalPlayersEl = document.getElementById('total-players');
@@ -73,6 +71,8 @@ async function init() {
         // Initialize game entry module with refresh callback and player names from Supabase
         const playerNames = [...new Set(gameLog.flatMap(g => g.players.map(p => p.name)))].sort();
         initGameEntry(refreshData, playerNames);
+        initDataTab({ getGames: () => gameLog });
+        renderDataTab();
 
         showContent();
     } catch (error) {
@@ -130,6 +130,7 @@ async function refreshData() {
         // Update autocomplete with any new player names from Supabase
         const updatedNames = [...new Set(gameLog.flatMap(g => g.players.map(p => p.name)))].sort();
         updatePlayerNames(updatedNames);
+        renderDataTab();
     } catch (error) {
         console.error('Failed to refresh data:', error);
     }
@@ -179,40 +180,9 @@ function updateStatsSummary() {
 }
 
 /**
- * Parse game range input
- * @returns {{start: number|null, end: number|null}}
- */
-function parseGameRange() {
-    const rangeStr = gameRangeInput.value.trim();
-    if (!rangeStr) {
-        return { start: null, end: null };
-    }
-
-    try {
-        if (rangeStr.includes('-')) {
-            const parts = rangeStr.split('-');
-            if (parts.length === 2) {
-                const start = parts[0].trim() ? parseInt(parts[0].trim()) : null;
-                const end = parts[1].trim() ? parseInt(parts[1].trim()) : null;
-                return { start, end };
-            }
-        } else {
-            const gameNum = parseInt(rangeStr);
-            return { start: gameNum, end: gameNum };
-        }
-    } catch {
-        return { start: null, end: null };
-    }
-
-    return { start: null, end: null };
-}
-
-/**
  * Render the leaderboard table
  */
 function renderLeaderboard() {
-    const { start, end } = parseGameRange();
-
     // Sort the leaderboard
     const sortedLeaderboard = [...leaderboard].sort((a, b) => {
         let aVal, bVal;
@@ -228,10 +198,6 @@ function renderLeaderboard() {
                 return currentSort.ascending
                     ? aVal.localeCompare(bVal)
                     : bVal.localeCompare(aVal);
-            case 'rating':
-                aVal = a.rating;
-                bVal = b.rating;
-                break;
             case 'overall':
                 aVal = a.overallWinPct || 0;
                 bVal = b.overallWinPct || 0;
@@ -249,8 +215,8 @@ function renderLeaderboard() {
                 bVal = b.gamesPlayed;
                 break;
             default:
-                aVal = a.rating;
-                bVal = b.rating;
+                aVal = a.overallWinPct || 0;
+                bVal = b.overallWinPct || 0;
         }
 
         return currentSort.ascending ? aVal - bVal : bVal - aVal;
@@ -261,26 +227,21 @@ function renderLeaderboard() {
 
     // Add rows
     sortedLeaderboard.forEach((player, index) => {
-        const delta = getRatingDelta(player, start, end);
-        const deltaStr = delta !== null ? (delta >= 0 ? `+${delta.toFixed(1)}` : delta.toFixed(1)) : '-';
-        const deltaClass = delta !== null ? (delta > 0 ? 'delta-positive' : delta < 0 ? 'delta-negative' : '') : '';
-        const deltaTextClass = delta !== null ? (delta > 0 ? 'delta-positive-text' : delta < 0 ? 'delta-negative-text' : '') : '';
-
         const row = document.createElement('tr');
-        row.className = `clickable ${deltaClass}`;
+        row.className = 'clickable';
         row.dataset.playerName = player.name;
 
-        // Rank styling
+        const displayRank = currentSort.column === 'rank' ? player.rank : index + 1;
+
+        // Rank styling (top 3 by current sort order)
         let rankClass = '';
-        if (player.rank === 1) rankClass = 'rank-1';
-        else if (player.rank === 2) rankClass = 'rank-2';
-        else if (player.rank === 3) rankClass = 'rank-3';
+        if (displayRank === 1) rankClass = 'rank-1';
+        else if (displayRank === 2) rankClass = 'rank-2';
+        else if (displayRank === 3) rankClass = 'rank-3';
 
         row.innerHTML = `
-            <td class="rank ${rankClass}">${player.rank}</td>
+            <td class="rank ${rankClass}">${displayRank}</td>
             <td class="player-name">${formatPlayerName(player.name)}</td>
-            <td class="rating">${player.rating.toFixed(1)}</td>
-            <td class="delta ${deltaTextClass}">${deltaStr}</td>
             <td class="pct">
                 <div class="pct-bar">
                     <span>${pctToStr(player.overallWinPct)}%</span>
@@ -308,7 +269,6 @@ function renderLeaderboard() {
             <td class="games">${player.gamesPlayed}</td>
         `;
 
-        row.addEventListener('click', () => showPlayerModal(player));
         tableBodyEl.appendChild(row);
     });
 
@@ -339,15 +299,15 @@ function updateSortIndicators() {
  * Set up event listeners
  */
 function setupEventListeners() {
-    // Game range input
-    gameRangeInput.addEventListener('input', () => {
-        renderLeaderboard();
-    });
-
-    // Clear range button
-    clearRangeBtn.addEventListener('click', () => {
-        gameRangeInput.value = '';
-        renderLeaderboard();
+    document.querySelectorAll('.page-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const page = tab.dataset.page;
+            document.querySelectorAll('.page-tab').forEach(t => t.classList.toggle('active', t === tab));
+            document.querySelectorAll('.page-panel').forEach(panel => {
+                panel.classList.toggle('active', panel.id === `panel-${page}`);
+            });
+            if (page === 'data') renderDataTab();
+        });
     });
 
     // Column sorting
@@ -358,193 +318,10 @@ function setupEventListeners() {
                 currentSort.ascending = !currentSort.ascending;
             } else {
                 currentSort.column = column;
-                currentSort.ascending = column === 'name'; // Default ascending for name
+                currentSort.ascending = column === 'name' || column === 'rank';
             }
             renderLeaderboard();
         });
-    });
-
-    // Modal close
-    document.querySelector('.modal-close').addEventListener('click', closePlayerModal);
-    document.querySelector('.modal-overlay').addEventListener('click', (e) => {
-        if (e.target.classList.contains('modal-overlay')) {
-            closePlayerModal();
-        }
-    });
-
-    // ESC key to close modal
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            closePlayerModal();
-        }
-    });
-}
-
-/**
- * Show player details modal with rating chart
- */
-function showPlayerModal(player) {
-    const modal = document.querySelector('.modal-overlay');
-    const modalTitle = document.querySelector('.modal h3');
-    const chartContainer = document.getElementById('rating-chart');
-
-    modalTitle.textContent = `${formatPlayerName(player.name)} - Rating History`;
-
-    // Show modal
-    modal.classList.add('active');
-    document.body.style.overflow = 'hidden';
-
-    // Render chart using Chart.js
-    renderRatingChart(player, chartContainer);
-}
-
-/**
- * Close player modal
- */
-function closePlayerModal() {
-    const modal = document.querySelector('.modal-overlay');
-    modal.classList.remove('active');
-    document.body.style.overflow = '';
-
-    // Destroy existing chart
-    const chartContainer = document.getElementById('rating-chart');
-    if (chartContainer.chart) {
-        chartContainer.chart.destroy();
-    }
-}
-
-/**
- * Render rating history chart
- */
-function renderRatingChart(player, container) {
-    // Destroy existing chart if any
-    if (container.chart) {
-        container.chart.destroy();
-    }
-
-    const history = player.ratingHistory;
-    const gameNumbers = history.map(h => h.gameNumber);
-    const ratings = history.map(h => h.rating);
-    const overallPcts = history.map(h => h.overallWinPct);
-    const goodPcts = history.map(h => h.goodWinPct);
-    const evilPcts = history.map(h => h.evilWinPct);
-
-    const ctx = container.getContext('2d');
-
-    container.chart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: gameNumbers,
-            datasets: [
-                {
-                    label: 'Rating',
-                    data: ratings,
-                    borderColor: '#60a5fa',
-                    backgroundColor: 'rgba(96, 165, 250, 0.1)',
-                    yAxisID: 'y',
-                    tension: 0.1,
-                    pointRadius: 3,
-                },
-                {
-                    label: 'Overall Win %',
-                    data: overallPcts,
-                    borderColor: '#a78bfa',
-                    borderDash: [5, 5],
-                    yAxisID: 'y1',
-                    tension: 0.1,
-                    pointRadius: 2,
-                },
-                {
-                    label: 'Good Win %',
-                    data: goodPcts,
-                    borderColor: '#4ade80',
-                    borderDash: [5, 5],
-                    yAxisID: 'y1',
-                    tension: 0.1,
-                    pointRadius: 2,
-                },
-                {
-                    label: 'Evil Win %',
-                    data: evilPcts,
-                    borderColor: '#f87171',
-                    borderDash: [5, 5],
-                    yAxisID: 'y1',
-                    tension: 0.1,
-                    pointRadius: 2,
-                },
-            ],
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: {
-                mode: 'index',
-                intersect: false,
-            },
-            plugins: {
-                legend: {
-                    labels: {
-                        color: '#eaeaea',
-                    },
-                },
-                tooltip: {
-                    backgroundColor: '#1a1a2e',
-                    titleColor: '#eaeaea',
-                    bodyColor: '#a0a0a0',
-                    borderColor: '#2d3748',
-                    borderWidth: 1,
-                },
-            },
-            scales: {
-                x: {
-                    title: {
-                        display: true,
-                        text: 'Game Number',
-                        color: '#a0a0a0',
-                    },
-                    ticks: {
-                        color: '#a0a0a0',
-                    },
-                    grid: {
-                        color: '#2d3748',
-                    },
-                },
-                y: {
-                    type: 'linear',
-                    display: true,
-                    position: 'left',
-                    title: {
-                        display: true,
-                        text: 'Rating',
-                        color: '#60a5fa',
-                    },
-                    ticks: {
-                        color: '#60a5fa',
-                    },
-                    grid: {
-                        color: '#2d3748',
-                    },
-                },
-                y1: {
-                    type: 'linear',
-                    display: true,
-                    position: 'right',
-                    title: {
-                        display: true,
-                        text: 'Win %',
-                        color: '#a78bfa',
-                    },
-                    ticks: {
-                        color: '#a78bfa',
-                    },
-                    grid: {
-                        drawOnChartArea: false,
-                    },
-                    min: 0,
-                    max: 100,
-                },
-            },
-        },
     });
 }
 

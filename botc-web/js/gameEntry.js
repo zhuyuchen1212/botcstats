@@ -21,7 +21,7 @@ import {
 } from './supabase.js';
 
 import { initAutocomplete } from './autocomplete.js';
-import { FABLED, LORICS } from './config.js';
+import { FABLED, LORICS, setScriptCategories, getScriptCategory } from './config.js';
 
 // Cache for scripts
 let scriptsCache = null;
@@ -30,6 +30,7 @@ let scriptsCache = null;
 let modal, codeStep, formStep, codeInput, verifyBtn, codeError;
 let team1Input, team2Input, evilTeamRadios, winnerRadios;
 let scriptSelect, storytellerInput, fabledInput, loricsInput, submitBtn, deleteGameBtn, submitError, submitSuccess;
+let reachedLastThreeCheckbox, lastThreeInput, lastThreeSection;
 let formTitle, formSubtitle;
 
 // DOM Elements - Game Search Modal
@@ -43,6 +44,7 @@ let newScriptError, newScriptSuccess;
 // Edit mode state
 let editMode = false;
 let currentEditGameId = null;
+let pendingEditGameId = null;
 
 /**
  * Initialize the game entry module
@@ -64,6 +66,9 @@ export function initGameEntry(onGameAdded, playerNames) {
     storytellerInput = document.getElementById('storyteller-input');
     fabledInput = document.getElementById('fabled-input');
     loricsInput = document.getElementById('lorics-input');
+    reachedLastThreeCheckbox = document.getElementById('reached-last-three');
+    lastThreeInput = document.getElementById('last-three-input');
+    lastThreeSection = document.getElementById('last-three-section');
     submitBtn = document.getElementById('submit-game-btn');
     deleteGameBtn = document.getElementById('delete-game-btn');
     submitError = document.getElementById('submit-error');
@@ -109,10 +114,41 @@ export function initGameEntry(onGameAdded, playerNames) {
     initAutocomplete(storytellerInput, { playerNames: names, multiline: false });
     initAutocomplete(fabledInput, { multiline: false, commaSeparated: true, candidates: FABLED });
     initAutocomplete(loricsInput, { multiline: false, commaSeparated: true, candidates: LORICS });
+    if (lastThreeInput) {
+        initAutocomplete(lastThreeInput, { playerNames: names, multiline: true });
+    }
+    if (reachedLastThreeCheckbox && lastThreeSection) {
+        reachedLastThreeCheckbox.addEventListener('change', () => {
+            lastThreeSection.style.display = reachedLastThreeCheckbox.checked ? 'block' : 'none';
+        });
+    }
 }
 
 // Re-export for app.js to call on refresh
 export { updatePlayerNames } from './autocomplete.js';
+
+/**
+ * Open the add-game modal.
+ */
+export function openAddGame() {
+    openModal();
+}
+
+/**
+ * Open a game for editing (from Data tab or elsewhere).
+ * Prompts for edit code if not already stored.
+ * @param {number} gameId
+ */
+export async function editGameById(gameId) {
+    const level = getStoredPermissionLevel();
+    if (level === 'edit') {
+        await loadGameForEdit(gameId);
+        return;
+    }
+    pendingEditGameId = gameId;
+    openSearchModal();
+    showEditCodeStep();
+}
 
 /**
  * Load scripts from the database and populate the dropdown
@@ -122,6 +158,7 @@ async function loadScripts() {
         const scripts = await fetchScripts();
         if (scripts && scripts.length > 0) {
             scriptsCache = scripts;
+            setScriptCategories(scripts);
 
             // Clear existing options and populate with database scripts
             scriptSelect.innerHTML = '';
@@ -129,6 +166,7 @@ async function loadScripts() {
                 const option = document.createElement('option');
                 option.value = script.name;
                 option.textContent = script.name;
+                option.dataset.category = script.category || 'Normal';
                 scriptSelect.appendChild(option);
             });
 
@@ -138,11 +176,25 @@ async function loadScripts() {
             addNewOption.textContent = '+ Add New Script...';
             addNewOption.className = 'add-new-option';
             scriptSelect.appendChild(addNewOption);
+        } else {
+            // If no scripts from database, keep the hardcoded options
+            tagScriptOptionCategories();
         }
-        // If no scripts from database, keep the hardcoded options
     } catch (error) {
         console.warn('Could not load scripts from database, using defaults:', error);
-        // Keep hardcoded options as fallback
+        tagScriptOptionCategories();
+    }
+}
+
+/**
+ * Set data-category on script dropdown options (hardcoded fallback).
+ */
+function tagScriptOptionCategories() {
+    if (!scriptSelect) return;
+    for (const opt of scriptSelect.options) {
+        if (opt.value && opt.value !== '__NEW__') {
+            opt.dataset.category = getScriptCategory(opt.value);
+        }
     }
 }
 
@@ -153,7 +205,7 @@ function setupEventListeners() {
     // Add Game button
     const addGameBtn = document.getElementById('add-game-btn');
     if (addGameBtn) {
-        addGameBtn.addEventListener('click', openModal);
+        addGameBtn.addEventListener('click', openAddGame);
     }
 
     // Modal close button
@@ -409,12 +461,39 @@ function parseTeamInput(text) {
         const trimmed = line.trim();
         if (!trimmed) continue;
 
-        const parts = trimmed.split(/\s+/);
-        if (parts.length < 1) continue;
+        let tokens = trimmed.split(/\s+/);
+        if (tokens.length < 1) continue;
 
-        const name = parts[0];
-        const roleStr = parts[1] || '';
-        const teamHint = parts[2] || null;
+        const name = tokens.shift();
+        let survived = true;
+        let last_three = false;
+
+        // Trailing flags: dead, alive, l3, last3
+        while (tokens.length > 0) {
+            const flag = tokens[tokens.length - 1].toLowerCase();
+            if (flag === 'dead') {
+                survived = false;
+                tokens.pop();
+            } else if (flag === 'alive') {
+                survived = true;
+                tokens.pop();
+            } else if (flag === 'l3' || flag === 'last3') {
+                last_three = true;
+                tokens.pop();
+            } else {
+                break;
+            }
+        }
+
+        let teamHint = null;
+        if (tokens.length > 0) {
+            const last = tokens[tokens.length - 1];
+            if (/^(good|evil)$/i.test(last) || last.includes('->')) {
+                teamHint = tokens.pop();
+            }
+        }
+
+        const roleStr = tokens.join(' ');
 
         // Process roles (split on +)
         const rawRoles = roleStr ? roleStr.split('+') : [''];
@@ -431,15 +510,48 @@ function parseTeamInput(text) {
             }
         }
 
-        players.push({
+        const player = {
             name,
             role: finalRole,
             roles,
-            initial_team: initialTeam
-        });
+            initial_team: initialTeam,
+            survived,
+        };
+        if (last_three) {
+            player.last_three = true;
+        }
+        players.push(player);
     }
 
     return players;
+}
+
+/**
+ * Parse last-three player names (one per line).
+ */
+function parseLastThreeNames(text) {
+    if (!text || !text.trim()) return new Set();
+    return new Set(
+        text.trim().split('\n')
+            .map(line => line.trim())
+            .filter(Boolean)
+    );
+}
+
+/**
+ * Apply last-three flags from game settings and name list.
+ */
+function applyLastThreeFlags(allPlayers, reachedLastThree, lastThreeNames) {
+    if (!reachedLastThree) return;
+
+    const nameSet = lastThreeNames;
+    for (const p of allPlayers) {
+        if (nameSet.size > 0) {
+            p.last_three = nameSet.has(p.name);
+        } else if (p.last_three !== true) {
+            p.last_three = false;
+        }
+    }
 }
 
 /**
@@ -510,6 +622,18 @@ async function submitGameForm() {
         return;
     }
 
+    const reachedLastThree = reachedLastThreeCheckbox?.checked === true;
+    const lastThreeNames = parseLastThreeNames(lastThreeInput?.value || '');
+    const allPlayersPreview = [...team1Players, ...team2Players];
+
+    if (reachedLastThree && lastThreeNames.size > 0) {
+        const unknown = [...lastThreeNames].filter(n => !allPlayersPreview.some(p => p.name === n));
+        if (unknown.length > 0) {
+            showError(submitError, `Last 3 names not in game: ${unknown.join(', ')}`);
+            return;
+        }
+    }
+
     // Assign teams based on evil selection
     const evilTeamNum = parseInt(evilTeam.value);
     const team1Team = evilTeamNum === 1 ? 'Evil' : 'Good';
@@ -525,24 +649,32 @@ async function submitGameForm() {
         if (!p.initial_team) p.initial_team = team2Team;
     }
 
+    const allPlayers = [...team1Players, ...team2Players];
+    applyLastThreeFlags(allPlayers, reachedLastThree, lastThreeNames);
+
     // Determine winning team
     const winnerNum = parseInt(winner.value);
     const winningTeam = winnerNum === 1 ? team1Team : team2Team;
 
-    // Parse modifiers
+    // Parse modifiers and game metadata
     const fabled = parseCommaSeparated(fabledInput.value);
     const lorics = parseCommaSeparated(loricsInput.value);
-    const modifiers = (fabled.length > 0 || lorics.length > 0)
-        ? { fabled, lorics }
-        : null;
+    const scriptName = scriptSelect.value;
+    const selectedOption = scriptSelect.selectedOptions[0];
+    const scriptCategory = selectedOption?.dataset?.category || getScriptCategory(scriptName);
+
+    const modifiers = { category: scriptCategory };
+    if (fabled.length > 0) modifiers.fabled = fabled;
+    if (lorics.length > 0) modifiers.lorics = lorics;
+    if (reachedLastThree) modifiers.reached_last_three = true;
 
     // Build game data
     const gameData = {
-        players: [...team1Players, ...team2Players],
+        players: allPlayers,
         winning_team: winningTeam,
-        game_mode: scriptSelect.value,
+        game_mode: scriptName,
         story_teller: storyteller,
-        modifiers
+        modifiers,
     };
 
     // Submit or Update
@@ -598,6 +730,9 @@ function clearForm() {
     storytellerInput.value = '';
     fabledInput.value = '';
     loricsInput.value = '';
+    if (reachedLastThreeCheckbox) reachedLastThreeCheckbox.checked = false;
+    if (lastThreeInput) lastThreeInput.value = '';
+    if (lastThreeSection) lastThreeSection.style.display = 'none';
 }
 
 /**
@@ -703,7 +838,14 @@ async function verifyEditCode() {
             storeCode(code);
             storePermissionLevel(level);
             hideError(editCodeError);
-            showSearchStep();
+            if (pendingEditGameId != null) {
+                const gameId = pendingEditGameId;
+                pendingEditGameId = null;
+                closeSearchModal();
+                await loadGameForEdit(gameId);
+            } else {
+                showSearchStep();
+            }
         } else if (level === 'submit') {
             showError(editCodeError, 'This code only allows adding games, not editing. Use the edit code.');
         } else {
@@ -879,13 +1021,27 @@ function populateFormWithGame(game) {
     // Set storyteller
     storytellerInput.value = game.story_teller || '';
 
-    // Set modifiers
+    // Set modifiers and last-three fields
     if (game.modifiers) {
         fabledInput.value = (game.modifiers.fabled || []).join(', ');
         loricsInput.value = (game.modifiers.lorics || []).join(', ');
+        if (reachedLastThreeCheckbox) {
+            reachedLastThreeCheckbox.checked = game.modifiers.reached_last_three === true;
+        }
     } else {
         fabledInput.value = '';
         loricsInput.value = '';
+        if (reachedLastThreeCheckbox) reachedLastThreeCheckbox.checked = false;
+    }
+
+    if (lastThreeSection) {
+        lastThreeSection.style.display = reachedLastThreeCheckbox?.checked ? 'block' : 'none';
+    }
+    if (lastThreeInput) {
+        const l3Names = (game.players || [])
+            .filter(p => p.last_three === true)
+            .map(p => p.name);
+        lastThreeInput.value = l3Names.join('\n');
     }
 }
 
@@ -906,6 +1062,14 @@ function formatPlayersForTextarea(players) {
         // Add team hint if initial team differs from final team
         if (p.initial_team && p.initial_team !== p.team) {
             line += ' ' + p.initial_team + '->' + p.team;
+        }
+
+        if (p.last_three === true) {
+            line += ' l3';
+        }
+
+        if (p.survived === false) {
+            line += ' dead';
         }
 
         return line;

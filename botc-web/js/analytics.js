@@ -8,24 +8,10 @@
  * - Player statistics computation
  */
 
-// ==========================================
-// CONFIGURATION (ported from botc_config.py)
-// ==========================================
+import { categorizeGame, categorizeScript } from './config.js';
 
-// Scripts considered part of the normal rotation
-const NORMAL_SCRIPTS = new Set([
-    "trouble brewing",
-    "bad moon rising",
-    "sects & violets",
-    "trouble in violets",
-    "trouble in legion",
-    "hide & seek",
-    "trouble brewing on expert mode",
-    "trained killer",
-    "irrational behavior",
-    "binary supernovae",
-    "everybody can play"
-]);
+// Re-export for analyticsApp.js
+export { categorizeGame, categorizeScript } from './config.js';
 
 // Character role type mapping
 const CHARACTER_ROLE_TYPES = {
@@ -206,15 +192,6 @@ export function normalizeScriptName(name) {
 }
 
 /**
- * Categorize a script as 'Normal' or 'Teensyville'.
- * @param {string} name - Script name
- * @returns {string} 'Normal' or 'Teensyville'
- */
-export function categorizeScript(name) {
-    return NORMAL_SCRIPTS.has(normalizeScriptName(name)) ? 'Normal' : 'Teensyville';
-}
-
-/**
  * Normalize a character name for lookup.
  * @param {string} name - Character name
  * @returns {string} Normalized name
@@ -379,7 +356,7 @@ export class StorytellerAnalytics {
     _computeScriptStats() {
         for (const game of this.games) {
             const script = game.game_mode || '';
-            const category = categorizeScript(script);
+            const category = categorizeGame(game);
 
             if (!this.scriptStats[script]) {
                 this.scriptStats[script] = {
@@ -433,6 +410,12 @@ export class StorytellerAnalytics {
                         good_wins: 0,
                         evil_games: 0,
                         evil_wins: 0,
+                        last_three_games: 0,
+                        last_three_wins: 0,
+                        survived_games: 0,
+                        survived_wins: 0,
+                        dead_games: 0,
+                        dead_wins: 0,
                         scripts: {},
                         roles: {}
                     };
@@ -455,6 +438,27 @@ export class StorytellerAnalytics {
                     entry.evil_games++;
                     if (team === winningTeam) {
                         entry.evil_wins++;
+                    }
+                }
+
+                const inLastThree = p.last_three === true;
+                const survived = p.survived !== false;
+
+                if (inLastThree) {
+                    entry.last_three_games++;
+                    if (team === winningTeam) {
+                        entry.last_three_wins++;
+                    }
+                }
+                if (survived) {
+                    entry.survived_games++;
+                    if (team === winningTeam) {
+                        entry.survived_wins++;
+                    }
+                } else {
+                    entry.dead_games++;
+                    if (team === winningTeam) {
+                        entry.dead_wins++;
                     }
                 }
 
@@ -490,11 +494,37 @@ export class StorytellerAnalytics {
                 for (const role of rolesList) {
                     if (!role) continue;
                     if (!entry.roles[role]) {
-                        entry.roles[role] = { games: 0, wins: 0 };
+                        entry.roles[role] = {
+                            games: 0,
+                            wins: 0,
+                            last_three_games: 0,
+                            last_three_wins: 0,
+                            survived_games: 0,
+                            survived_wins: 0,
+                            dead_games: 0,
+                            dead_wins: 0,
+                        };
                     }
                     entry.roles[role].games++;
                     if (team === winningTeam) {
                         entry.roles[role].wins++;
+                    }
+                    if (inLastThree) {
+                        entry.roles[role].last_three_games++;
+                        if (team === winningTeam) {
+                            entry.roles[role].last_three_wins++;
+                        }
+                    }
+                    if (survived) {
+                        entry.roles[role].survived_games++;
+                        if (team === winningTeam) {
+                            entry.roles[role].survived_wins++;
+                        }
+                    } else {
+                        entry.roles[role].dead_games++;
+                        if (team === winningTeam) {
+                            entry.roles[role].dead_wins++;
+                        }
                     }
                 }
             }
@@ -628,9 +658,9 @@ export class StorytellerAnalytics {
         if (scriptFilter === 'All') {
             filteredGames = this.games;
         } else if (scriptFilter === 'Normal') {
-            filteredGames = this.games.filter(g => categorizeScript(g.game_mode || '') === 'Normal');
+            filteredGames = this.games.filter(g => categorizeGame(g) === 'Normal');
         } else if (scriptFilter === 'Teensyville') {
-            filteredGames = this.games.filter(g => categorizeScript(g.game_mode || '') === 'Teensyville');
+            filteredGames = this.games.filter(g => categorizeGame(g) === 'Teensyville');
         } else {
             filteredGames = this.games.filter(g => (g.game_mode || '') === scriptFilter);
         }
@@ -646,32 +676,63 @@ export class StorytellerAnalytics {
                 const role = p.role || '';
                 if (!role) continue;
                 if (!roleTeams[role]) roleTeams[role] = [];
-                roleTeams[role].push(p.team);
+                roleTeams[role].push({ team: p.team, survived: p.survived, last_three: p.last_three });
             }
 
             // Count unique roles per game
-            for (const [role, teams] of Object.entries(roleTeams)) {
+            for (const [role, entries] of Object.entries(roleTeams)) {
                 if (!charStats[role]) {
                     charStats[role] = {
                         games: 0,
                         wins: 0,
-                        role_type: getCharacterRoleType(role)
+                        role_type: getCharacterRoleType(role),
+                        last_three_games: 0,
+                        last_three_wins: 0,
+                        survived_games: 0,
+                        survived_wins: 0,
+                        dead_games: 0,
+                        dead_wins: 0,
                     };
                 }
+                const teams = entries.map(e => e.team);
                 charStats[role].games++;
                 if (teams.includes(winningTeam)) {
                     charStats[role].wins++;
+                }
+                for (const e of entries) {
+                    const won = e.team === winningTeam;
+                    if (e.last_three === true) {
+                        charStats[role].last_three_games++;
+                        if (won) charStats[role].last_three_wins++;
+                    }
+                    if (e.survived === false) {
+                        charStats[role].dead_games++;
+                        if (won) charStats[role].dead_wins++;
+                    } else {
+                        charStats[role].survived_games++;
+                        if (won) charStats[role].survived_wins++;
+                    }
                 }
             }
         }
 
         // Convert to array and apply role type filter
+        const pct = (w, g) => g > 0 ? (w / g * 100) : null;
         let result = Object.entries(charStats).map(([role, stats]) => ({
             character: role,
             role_type: stats.role_type,
             games: stats.games,
             wins: stats.wins,
-            win_pct: stats.games > 0 ? (stats.wins / stats.games * 100) : 0
+            win_pct: stats.games > 0 ? (stats.wins / stats.games * 100) : 0,
+            last_three_games: stats.last_three_games,
+            last_three_wins: stats.last_three_wins,
+            last3_win_pct: pct(stats.last_three_wins, stats.last_three_games),
+            survived_games: stats.survived_games,
+            survived_wins: stats.survived_wins,
+            survived_win_pct: pct(stats.survived_wins, stats.survived_games),
+            dead_games: stats.dead_games,
+            dead_wins: stats.dead_wins,
+            dead_win_pct: pct(stats.dead_wins, stats.dead_games),
         }));
 
         if (roleTypeFilter !== 'All') {
@@ -682,6 +743,83 @@ export class StorytellerAnalytics {
         result.sort((a, b) => b.win_pct - a.win_pct);
 
         return result;
+    }
+
+    /**
+     * Community-wide survival / last-3 summary for the dashboard.
+     */
+    getSurvivalSummary() {
+        let trackedGames = 0;
+        let alivePlays = 0;
+        let aliveWins = 0;
+        let deadPlays = 0;
+        let deadWins = 0;
+        let last3Plays = 0;
+        let last3Wins = 0;
+
+        for (const game of this.games) {
+            const players = game.players || [];
+            const hasSurvivalData = game.modifiers?.reached_last_three === true
+                || players.some(p => p.survived === false || p.last_three === true);
+            if (!hasSurvivalData) continue;
+
+            trackedGames++;
+            for (const p of players) {
+                const won = p.team === game.winning_team;
+                if (p.survived === false) {
+                    deadPlays++;
+                    if (won) deadWins++;
+                } else {
+                    alivePlays++;
+                    if (won) aliveWins++;
+                }
+                if (p.last_three === true) {
+                    last3Plays++;
+                    if (won) last3Wins++;
+                }
+            }
+        }
+
+        const pct = (n, d) => d > 0 ? (n / d * 100).toFixed(1) : null;
+
+        return {
+            trackedGames,
+            alivePlays,
+            aliveWins,
+            aliveWinPct: pct(aliveWins, alivePlays),
+            deadPlays,
+            deadWins,
+            deadWinPct: pct(deadWins, deadPlays),
+            last3Plays,
+            last3Wins,
+            last3WinPct: pct(last3Wins, last3Plays),
+        };
+    }
+
+    /**
+     * Per-player survival stats for the survival dashboard table.
+     */
+    getSurvivalPlayerStats() {
+        const pct = (wins, games) => games > 0 ? (wins / games * 100) : null;
+
+        return Object.entries(this.playerStats)
+            .map(([name, s]) => ({
+                name,
+                games: s.games,
+                last_three_games: s.last_three_games,
+                last_three_wins: s.last_three_wins,
+                last3WinPct: pct(s.last_three_wins, s.last_three_games),
+                survived_games: s.survived_games,
+                survived_wins: s.survived_wins,
+                survivedWinPct: pct(s.survived_wins, s.survived_games),
+                dead_games: s.dead_games,
+                dead_wins: s.dead_wins,
+                deadWinPct: pct(s.dead_wins, s.dead_games),
+                hasSurvivalData: s.dead_games > 0 || s.last_three_games > 0
+                    || (s.survived_games > 0 && this.games.some(g =>
+                        g.players?.some(p => p.name === name && p.survived === false))),
+            }))
+            .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
     }
 
     /**

@@ -374,6 +374,41 @@
     margin-top: 0.25rem;
 }
 
+.player-status-badge {
+    display: inline-block;
+    font-size: 0.75rem;
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    margin-right: 0.25rem;
+    font-weight: 600;
+}
+
+.player-status-badge.last3 {
+    background: rgba(167, 139, 250, 0.2);
+    color: var(--accent-purple);
+}
+
+.player-status-badge.alive {
+    background: rgba(74, 222, 128, 0.15);
+    color: var(--accent-good);
+}
+
+.player-status-badge.dead {
+    background: rgba(248, 113, 113, 0.15);
+    color: var(--accent-evil);
+}
+
+.survival-intro {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    margin: 0 0 1.25rem;
+    line-height: 1.5;
+}
+
+.survival-summary {
+    margin-bottom: 1.5rem;
+}
+
 .player-stat-card .stat-detail {
     font-size: 0.8rem;
     color: var(--text-muted);

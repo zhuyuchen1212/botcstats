@@ -4,20 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Blood on the Clocktower Stats</title>
-    <meta name="description" content="ELO ratings and statistics for Blood on the Clocktower games">
+    <meta name="description" content="Win rates and statistics for Blood on the Clocktower games">
 
     <!-- Styles -->
     <link rel="stylesheet" href="css/styles.css">
 
-    <!-- Chart.js for graphs -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
     <div class="container">
         <!-- Header -->
         <header>
             <h1>Blood on the Clocktower</h1>
-            <p>ELO Rankings & Game Statistics</p>
+            <p>Game Statistics & Win Rates</p>
             <nav class="header-nav">
                 <a href="index.html" class="active">Leaderboard</a>
                 <a href="analytics.html">Analytics</a>
@@ -38,6 +36,12 @@
 
         <!-- Main Content -->
         <div id="content" style="display: none;">
+            <nav class="page-tabs" aria-label="Main sections">
+                <button type="button" class="page-tab active" data-page="leaderboard">Leaderboard</button>
+                <button type="button" class="page-tab" data-page="data">Data</button>
+            </nav>
+
+            <div id="panel-leaderboard" class="page-panel active">
             <!-- Win Percentages Bar -->
             <div class="win-bar-container">
                 <div class="win-bar-header">
@@ -62,9 +66,6 @@
                 <div class="table-header">
                     <h2>Player Rankings</h2>
                     <div class="controls">
-                        <label for="game-range">Game Range:</label>
-                        <input type="text" id="game-range" placeholder="e.g., 67-69">
-                        <button id="clear-range" class="secondary">Clear</button>
                         <button class="add-game-btn" id="add-game-btn">+ Add Game</button>
                         <button class="edit-game-btn secondary" id="edit-game-btn">Edit Game</button>
                     </div>
@@ -75,8 +76,6 @@
                         <tr>
                             <th data-sort="rank">Rank</th>
                             <th data-sort="name">Name</th>
-                            <th data-sort="rating">Rating</th>
-                            <th>Delta</th>
                             <th data-sort="overall">Overall Win %</th>
                             <th data-sort="good">Good Win %</th>
                             <th data-sort="evil">Evil Win %</th>
@@ -88,6 +87,33 @@
                     </tbody>
                 </table>
             </div>
+            </div>
+
+            <div id="panel-data" class="page-panel">
+                <div class="table-container data-tab-container">
+                    <div class="table-header">
+                        <h2>Past Games</h2>
+                        <span id="data-game-count" class="data-game-count">0 games</span>
+                    </div>
+                    <div class="data-filter-row">
+                        <input type="text" id="data-filter" class="data-filter-input" placeholder="Search by game #, script, storyteller, winner, or player…" autocomplete="off">
+                    </div>
+                    <table class="data-games-table">
+                        <thead>
+                            <tr>
+                                <th>Game</th>
+                                <th>Date</th>
+                                <th>Script</th>
+                                <th>Storyteller</th>
+                                <th>Winner</th>
+                                <th>Players</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="data-games-body"></tbody>
+                    </table>
+                </div>
+            </div>
         </div>
 
         <!-- Footer -->
@@ -98,17 +124,6 @@
                 <a href="https://github.com/RossFW/botc-stats" target="_blank">View on GitHub</a>
             </p>
         </footer>
-    </div>
-
-    <!-- Player Modal -->
-    <div class="modal-overlay">
-        <div class="modal">
-            <button class="modal-close">&times;</button>
-            <h3>Player Name - Rating History</h3>
-            <div class="chart-container" style="height: 400px;">
-                <canvas id="rating-chart"></canvas>
-            </div>
-        </div>
     </div>
 
     <!-- Game Entry Modal -->
@@ -174,6 +189,8 @@
                             <p class="help-detail" style="margin-top: 8px;"><strong>Storyteller:</strong> Multiple storytellers? Use <strong>+</strong> (e.g., <code>Jane+Mike</code>).</p>
 
                             <p class="help-detail" style="margin-top: 4px;"><strong>Fabled &amp; Lorics:</strong> Optional comma-separated fields below the script. These are game-level modifiers, not player roles.</p>
+
+                            <p class="help-detail" style="margin-top: 8px;"><strong>Last 3 &amp; survival:</strong> add <strong>l3</strong> or <strong>dead</strong> after a player line, or use the final-3 checkbox below.</p>
                         </div>
                     </div>
 
@@ -248,6 +265,22 @@
                         <div class="form-group">
                             <label for="lorics-input">Lorics <span class="label-hint">(optional)</span></label>
                             <input type="text" id="lorics-input" placeholder="e.g., Bootlegger">
+                        </div>
+                    </div>
+
+                    <div class="form-row game-meta-row">
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="reached-last-three">
+                                Game reached final 3 players
+                            </label>
+                        </div>
+                    </div>
+
+                    <div id="last-three-section" class="form-row" style="display: none;">
+                        <div class="form-group full-width">
+                            <label for="last-three-input">Players in final 3 <span class="label-hint">(one per line, optional if using l3 on player lines)</span></label>
+                            <textarea id="last-three-input" rows="3" placeholder="e.g., Sarah_Lin&#10;Mike_Chen&#10;Tom_Nguyen"></textarea>
                         </div>
                     </div>
 

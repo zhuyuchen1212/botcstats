@@ -2,8 +2,9 @@
  * Analytics Application - Main entry point for the analytics dashboard.
  */
 
-import { fetchGames, isDemoMode } from './supabase.js';
+import { fetchGames, isDemoMode, fetchScripts } from './supabase.js';
 import SITE_CONFIG from './site-config.js';
+import { setScriptCategories } from './config.js';
 import {
     StorytellerAnalytics,
     extractStorytellers,
@@ -20,7 +21,7 @@ import {
 
 let allGames = [];
 let currentAnalytics = null;
-let characterEloRatings = {};  // Global character ELO ratings
+let characterEloRatings = {};
 let currentSortColumn = {};
 let currentSortAscending = {};
 
@@ -59,10 +60,16 @@ async function loadData() {
 
     allGames = await fetchGames();
 
+    try {
+        const scripts = await fetchScripts();
+        setScriptCategories(scripts);
+    } catch (e) {
+        console.warn('Could not load script categories:', e);
+    }
+
     // Initialize analytics with all games
     currentAnalytics = new StorytellerAnalytics(allGames, 'All');
 
-    // Calculate character ELO ratings (uses all games for global rating)
     characterEloRatings = calculateCharacterElo(allGames);
 
     // Populate storyteller dropdown
@@ -77,6 +84,7 @@ async function loadData() {
 
     // Update all displays
     updateSummary();
+    updateSurvivalTab();
     updateScriptsTab();
     updateCharactersTab();
     updateModifiersTab();
@@ -264,6 +272,7 @@ function onFilterChange() {
 
     // Update all displays
     updateSummary();
+    updateSurvivalTab();
     updateScriptsTab();
     updateCharactersTab();
     updateModifiersTab();
@@ -323,10 +332,109 @@ function repopulatePlayerDropdowns() {
  */
 function updateSummary() {
     const summary = currentAnalytics.getSummary();
+    const survival = currentAnalytics.getSurvivalSummary();
 
     document.getElementById('summary-games').textContent = `${summary.totalGames} games`;
     document.getElementById('summary-good').textContent = `Good: ${summary.goodPct}%`;
     document.getElementById('summary-evil').textContent = `Evil: ${summary.evilPct}%`;
+
+    const aliveEl = document.getElementById('summary-alive');
+    const deadEl = document.getElementById('summary-dead');
+    if (survival.trackedGames > 0) {
+        aliveEl.textContent = `Alive: ${survival.aliveWinPct}%`;
+        deadEl.textContent = `Dead: ${survival.deadWinPct}%`;
+    } else {
+        aliveEl.textContent = 'Alive: —';
+        deadEl.textContent = 'Dead: —';
+    }
+}
+
+// ==========================================
+// SURVIVAL TAB
+// ==========================================
+
+function formatSurvivalPct(value) {
+    return value != null ? `${value}%` : '—';
+}
+
+/**
+ * Update the survival dashboard tab.
+ */
+function updateSurvivalTab() {
+    const summary = currentAnalytics.getSurvivalSummary();
+
+    document.getElementById('survival-alive-pct').textContent = formatSurvivalPct(summary.aliveWinPct);
+    document.getElementById('survival-alive-detail').textContent =
+        `${summary.aliveWins} wins / ${summary.alivePlays} alive at end`;
+    document.getElementById('survival-dead-pct').textContent = formatSurvivalPct(summary.deadWinPct);
+    document.getElementById('survival-dead-detail').textContent =
+        `${summary.deadWins} wins / ${summary.deadPlays} died early`;
+    document.getElementById('survival-last3-pct').textContent = formatSurvivalPct(summary.last3WinPct);
+    document.getElementById('survival-last3-detail').textContent =
+        `${summary.last3Wins} wins / ${summary.last3Plays} in final 3`;
+    document.getElementById('survival-tracked-games').textContent = summary.trackedGames;
+
+    const tbody = document.getElementById('survival-body');
+    tbody.innerHTML = '';
+    const players = currentAnalytics.getSurvivalPlayerStats();
+
+    if (players.length === 0) {
+        const row = document.createElement('tr');
+        row.innerHTML = '<td colspan="8" style="text-align:center; opacity:0.5;">No survival data yet — mark players with <strong>dead</strong> or <strong>l3</strong> when logging games</td>';
+        tbody.appendChild(row);
+    } else {
+        for (const p of players) {
+            const row = document.createElement('tr');
+            row.style.cursor = 'pointer';
+            row.innerHTML = `
+                <td><strong>${p.name.replace(/_/g, ' ')}</strong></td>
+                <td>${p.games}</td>
+                <td class="good-text">${formatSurvivalPct(p.survivedWinPct)}</td>
+                <td>${p.survived_games}</td>
+                <td class="evil-text">${formatSurvivalPct(p.deadWinPct)}</td>
+                <td>${p.dead_games}</td>
+                <td>${formatSurvivalPct(p.last3WinPct)}</td>
+                <td>${p.last_three_games}</td>
+            `;
+            row.addEventListener('click', () => {
+                document.getElementById('player-select').value = p.name;
+                switchTab('players');
+                updatePlayerTab();
+            });
+            tbody.appendChild(row);
+        }
+    }
+
+    const rolesBody = document.getElementById('survival-roles-body');
+    rolesBody.innerHTML = '';
+    const characters = currentAnalytics.getCharacterStats('All', 'All')
+        .filter(c => c.dead_games > 0 || c.last_three_games > 0 || c.survived_games > 0);
+
+    if (characters.length === 0) {
+        const row = document.createElement('tr');
+        row.innerHTML = '<td colspan="7" style="text-align:center; opacity:0.5;">No role survival data yet</td>';
+        rolesBody.appendChild(row);
+    } else {
+        for (const char of characters) {
+            const row = document.createElement('tr');
+            row.style.cursor = 'pointer';
+            row.innerHTML = `
+                <td>${char.character.replace(/_/g, ' ')}</td>
+                <td><span class="role-type-badge ${char.role_type.toLowerCase()}">${char.role_type}</span></td>
+                <td>${char.win_pct.toFixed(1)}%</td>
+                <td>${char.games}</td>
+                <td class="good-text">${formatSurvivalPct(char.survived_win_pct)}</td>
+                <td class="evil-text">${formatSurvivalPct(char.dead_win_pct)}</td>
+                <td>${formatSurvivalPct(char.last3_win_pct)}</td>
+            `;
+            row.addEventListener('click', () => {
+                const eloData = characterEloRatings[char.character];
+                const elo = eloData ? Math.round(eloData.rating) : 1500;
+                showCharacterDetail(char.character, char.role_type, elo);
+            });
+            rolesBody.appendChild(row);
+        }
+    }
 }
 
 // ==========================================
@@ -417,7 +525,6 @@ function updateCharactersTab() {
 
     const characters = currentAnalytics.getCharacterStats(scriptFilter, roleTypeFilter);
 
-    // Add ELO ratings to each character
     const charactersWithElo = characters.map(char => {
         const eloData = characterEloRatings[char.character];
         return {
@@ -426,7 +533,6 @@ function updateCharactersTab() {
         };
     });
 
-    // Sort by ELO by default if current sort is elo
     const sortCol = currentSortColumn['characters-table'];
     if (sortCol === 'elo') {
         const ascending = currentSortAscending['characters-table'];
@@ -439,7 +545,6 @@ function updateCharactersTab() {
         row.dataset.roleType = char.role_type;
         row.dataset.elo = char.elo;
 
-        // Color-code ELO: green if above 1500, red if below
         const eloClass = char.elo >= 1500 ? 'elo-positive' : 'elo-negative';
 
         row.innerHTML = `
@@ -451,7 +556,6 @@ function updateCharactersTab() {
             <td>${char.games}</td>
         `;
 
-        // Add click handler to show character detail
         row.addEventListener('click', () => {
             showCharacterDetail(char.character, char.role_type, char.elo);
         });
@@ -495,6 +599,23 @@ function updatePlayerTab() {
     document.getElementById('player-evil-pct').textContent = `${evilPct}%`;
     document.getElementById('player-evil-games').textContent = `${stats.evil_games} games`;
     document.getElementById('player-total-games').textContent = stats.games;
+
+    const last3Pct = stats.last_three_games > 0
+        ? (stats.last_three_wins / stats.last_three_games * 100).toFixed(1)
+        : null;
+    const survivedPct = stats.survived_games > 0
+        ? (stats.survived_wins / stats.survived_games * 100).toFixed(1)
+        : null;
+    const deadPct = stats.dead_games > 0
+        ? (stats.dead_wins / stats.dead_games * 100).toFixed(1)
+        : null;
+
+    document.getElementById('player-last3-pct').textContent = last3Pct != null ? `${last3Pct}%` : '—';
+    document.getElementById('player-last3-games').textContent = `${stats.last_three_games} games`;
+    document.getElementById('player-survived-pct').textContent = survivedPct != null ? `${survivedPct}%` : '—';
+    document.getElementById('player-survived-games').textContent = `${stats.survived_games} games`;
+    document.getElementById('player-dead-pct').textContent = deadPct != null ? `${deadPct}%` : '—';
+    document.getElementById('player-dead-games').textContent = `${stats.dead_games} games`;
 
     // Update per-script breakdown
     updatePlayerScriptsTable(stats);
@@ -584,6 +705,12 @@ function updatePlayerRolesTable(stats) {
 
     for (const [role, r] of roleEntries) {
         const winPct = r.games > 0 ? (r.wins / r.games * 100).toFixed(1) : '0.0';
+        const last3Pct = r.last_three_games > 0
+            ? (r.last_three_wins / r.last_three_games * 100).toFixed(1)
+            : '—';
+        const survivedPct = r.survived_games > 0
+            ? (r.survived_wins / r.survived_games * 100).toFixed(1)
+            : '—';
         const roleType = getCharacterRoleType(role);
 
         const row = document.createElement('tr');
@@ -594,6 +721,8 @@ function updatePlayerRolesTable(stats) {
             <td>${winPct}%</td>
             <td>${r.wins}</td>
             <td>${r.games}</td>
+            <td>${last3Pct}${last3Pct !== '—' ? '%' : ''}</td>
+            <td>${survivedPct}${survivedPct !== '—' ? '%' : ''}</td>
         `;
         row.addEventListener('click', () => {
             const games = currentAnalytics.games.filter(g =>
@@ -854,7 +983,16 @@ function showGameDetail(game) {
                 rolesHtml = p.roles.map(r => r.replace(/_/g, ' ')).join(' <span class="role-arrow">→</span> ');
             }
 
-            row.innerHTML = `<td>${nameHtml}</td><td>${rolesHtml}</td>`;
+            const statusParts = [];
+            if (p.last_three === true) statusParts.push('<span class="player-status-badge last3">Last 3</span>');
+            if (p.survived === false) {
+                statusParts.push('<span class="player-status-badge dead">Dead</span>');
+            } else if (p.survived === true && game.players?.some(pl => pl.survived === false)) {
+                statusParts.push('<span class="player-status-badge alive">Alive</span>');
+            }
+            const statusHtml = statusParts.length > 0 ? statusParts.join(' ') : '—';
+
+            row.innerHTML = `<td>${nameHtml}</td><td>${rolesHtml}</td><td>${statusHtml}</td>`;
             tbody.appendChild(row);
         }
     }
@@ -1106,6 +1244,8 @@ function handleSort(th) {
         updateScriptsTab();
     } else if (tableId === 'characters-table') {
         sortCharactersTable(sortKey, currentSortAscending[tableId]);
+    } else if (tableId === 'survival-table' || tableId === 'survival-roles-table') {
+        sortGenericTable(table, sortKey, currentSortAscending[tableId]);
     } else if (tableId === 'player-scripts-table' || tableId === 'player-roles-table') {
         sortGenericTable(table, sortKey, currentSortAscending[tableId]);
     }

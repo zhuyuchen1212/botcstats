@@ -220,18 +220,16 @@ export function getLeaderboard(players, minGames = MIN_GAMES_FOR_LEADERBOARD) {
 
         leaderboard.push({
             name: player.name,
-            rating: player.currentRating,
             gamesPlayed: player.gamesOverall,
             overallWinPct: winPcts.overall,
             goodWinPct: winPcts.good,
             evilWinPct: winPcts.evil,
-            ratingHistory: player.ratingHistory,
             gameHistory: player.gameHistory,
         });
     }
 
-    // Sort by rating (highest first)
-    leaderboard.sort((a, b) => b.rating - a.rating);
+    // Sort by overall win percentage (highest first)
+    leaderboard.sort((a, b) => (b.overallWinPct || 0) - (a.overallWinPct || 0));
 
     // Add rank
     leaderboard.forEach((player, index) => {
