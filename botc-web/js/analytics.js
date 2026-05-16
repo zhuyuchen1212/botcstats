@@ -748,11 +748,9 @@ export class StorytellerAnalytics {
     getSurvivalSummary() {
         let trackedGames = 0;
         let alivePlays = 0;
-        let aliveWins = 0;
         let deadPlays = 0;
-        let deadWins = 0;
-        let last3Plays = 0;
-        let last3Wins = 0;
+        let gamesReachedLast3 = 0;
+        const totalGames = this.games.length;
 
         for (const game of this.games) {
             const players = game.players || [];
@@ -761,18 +759,16 @@ export class StorytellerAnalytics {
             if (!hasSurvivalData) continue;
 
             trackedGames++;
+            if (game.modifiers?.reached_last_three === true
+                || players.some(p => p.last_three === true)) {
+                gamesReachedLast3++;
+            }
+
             for (const p of players) {
-                const won = p.team === game.winning_team;
                 if (p.survived === false) {
                     deadPlays++;
-                    if (won) deadWins++;
                 } else {
                     alivePlays++;
-                    if (won) aliveWins++;
-                }
-                if (p.last_three === true) {
-                    last3Plays++;
-                    if (won) last3Wins++;
                 }
             }
         }
@@ -782,12 +778,13 @@ export class StorytellerAnalytics {
 
         return {
             trackedGames,
+            totalGames,
             alivePlays,
             deadPlays,
             survivalPlays,
             survivalPct: ratePct(alivePlays, survivalPlays),
-            last3Plays,
-            last3Pct: ratePct(last3Plays, survivalPlays),
+            gamesReachedLast3,
+            last3Pct: ratePct(gamesReachedLast3, totalGames),
         };
     }
 

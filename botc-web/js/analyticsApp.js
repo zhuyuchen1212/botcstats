@@ -344,7 +344,7 @@ function updateSummary() {
         const surv = survival.survivalPct != null ? survival.survivalPct.toFixed(1) : '—';
         const l3 = survival.last3Pct != null ? survival.last3Pct.toFixed(1) : '—';
         aliveEl.textContent = `Survival: ${surv}%`;
-        deadEl.textContent = `Last 3: ${l3}%`;
+        deadEl.textContent = `Final 3 games: ${l3}%`;
     } else {
         aliveEl.textContent = 'Alive: —';
         deadEl.textContent = 'Dead: —';
@@ -373,7 +373,7 @@ function updateSurvivalTab() {
         `${summary.alivePlays} alive / ${summary.survivalPlays} tracked player-games`;
     document.getElementById('survival-last3-pct').textContent = formatSurvivalPct(summary.last3Pct);
     document.getElementById('survival-last3-detail').textContent =
-        `${summary.last3Plays} in final 3 / ${summary.survivalPlays} tracked player-games`;
+        `${summary.gamesReachedLast3} of ${summary.totalGames} games reached final 3`;
     document.getElementById('survival-tracked-games').textContent = summary.trackedGames;
 
     const tbody = document.getElementById('survival-body');
